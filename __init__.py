@@ -7,7 +7,9 @@ node_list = [ #Add list of .py files containing nodes here
     "sampler_rescalecfg",
     "sampler_tonemap",
     "sampler_tonemap_rescalecfg",
-    "sdxl_model_merging"
+    "sdxl_model_merging",
+    "model_save_custom",
+    "aligned_cond",
 ]
 
 NODE_CLASS_MAPPINGS = {}
