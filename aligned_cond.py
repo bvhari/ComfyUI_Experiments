@@ -11,6 +11,8 @@ te_config = {
 def get_embeddings_tag(embeddings_dict: dict) -> dict:
     embeddings_dict_tag = {}
     for key in embeddings_dict.keys():
+        if key not in te_config.keys():
+            continue
         embeddings = embeddings_dict[key]
         embeddings_dict_tag[key] = embeddings_dict_tag.get(key, [])
         for embedding in embeddings:
@@ -74,6 +76,7 @@ class AlignedConditioning(ComfyNodeABC):
             )
         
         tags = [tag.strip() for tag in text.split(sep)]
+        embeddings_dict_default = te.tokenize(sep.join(tags))
         embeddings_dict_tags = {}
         for tag in tags:
             embeddings_dict = te.tokenize(tag)
@@ -91,6 +94,9 @@ class AlignedConditioning(ComfyNodeABC):
 
         embeddings_dict_final = {}
         for key in embeddings_dict_tags.keys():
+            if key not in te_config.keys():
+                embeddings_dict_final[key] = embeddings_dict_default[key]
+                continue
             embeddings_dict_final[key] = embeddings_dict_final.get(key, [])
             sep = embeddings_dict_sep[key]
             sep_len = len(sep)
