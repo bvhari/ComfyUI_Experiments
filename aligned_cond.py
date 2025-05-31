@@ -1,5 +1,6 @@
 import logging
 from comfy.comfy_types import IO, ComfyNodeABC, InputTypeDict
+from comfy.sd1_clip import escape_important, unescape_important, token_weights
 
 
 te_config = {
@@ -8,7 +9,7 @@ te_config = {
 }
 
 
-def get_embeddings_tag(embeddings_dict: dict) -> dict:
+def get_embeddings_tag(embeddings_dict: dict, weight = 1.0) -> dict:
     embeddings_dict_tag = {}
     for key in embeddings_dict.keys():
         if key not in te_config.keys():
@@ -18,7 +19,7 @@ def get_embeddings_tag(embeddings_dict: dict) -> dict:
         for embedding in embeddings:
             start = 0
             end = 0
-            for i, (token, weight) in enumerate(embedding):
+            for i, (token, _) in enumerate(embedding):
                 if token == te_config[key]["start"]:
                     start = i
                 if (token == te_config[key]["pad"] or token == te_config[key]["end"]):
@@ -27,6 +28,7 @@ def get_embeddings_tag(embeddings_dict: dict) -> dict:
             if (end - start) < 2:
                 continue
             embedding_tag = embedding[start + 1 : end]
+            embedding_tag = [(token, weight) for token, _ in embedding_tag]
             embeddings_dict_tag[key].append(embedding_tag)
     
     return embeddings_dict_tag
@@ -74,34 +76,44 @@ class AlignedConditioning(ComfyNodeABC):
             raise RuntimeError(
                 "ERROR: TE input is invalid: None\n\nIf the TE is from a checkpoint loader node your checkpoint does not contain a valid text encoder model."
             )
+        escaped_text = escape_important(text)
+        weighted_segments = token_weights(escaped_text, 1.0)
+        weighted_tags = []
+        for escaped_segment, weight in weighted_segments:
+            segment = unescape_important(escaped_segment)
+            segment = segment.strip().strip(sep)
+            tags_segment = [tag.strip() for tag in segment.split(sep)]
+            tags_segment_weighted = [(tag, weight) for tag in tags_segment if tag]
+            weighted_tags.extend(tags_segment_weighted)
         
-        tags = [tag.strip() for tag in text.split(sep)]
-        embeddings_dict_default = te.tokenize(sep.join(tags))
+        embeddings_dict_default = te.tokenize(text)
         embeddings_dict_tags = {}
-        for tag in tags:
+        for tag, weight in weighted_tags:
             embeddings_dict = te.tokenize(tag)
             for key in embeddings_dict.keys():
                 embeddings_dict_tags[key] = embeddings_dict_tags.get(key, [])
-            embeddings_dict_tag = get_embeddings_tag(embeddings_dict)
+            embeddings_dict_tag = get_embeddings_tag(embeddings_dict, weight)
             for key in embeddings_dict_tags:
                 embeddings_dict_tags[key].extend(embeddings_dict_tag.get(key, []))
         
         embeddings_dict_sep = {}
         embeddings_dict = te.tokenize(sep)
-        embeddings_dict_sep_full = get_embeddings_tag(embeddings_dict)
+        embeddings_dict_sep_full = get_embeddings_tag(embeddings_dict, 1.0)
         for key in embeddings_dict:
             embeddings_dict_sep[key] = (embeddings_dict_sep_full.get(key, [[]]))[0]
 
         embeddings_dict_final = {}
-        for key in embeddings_dict_tags.keys():
+        for key in embeddings_dict_default.keys():
             if key not in te_config.keys():
+                logging.warning(f'WARNING: Unsupported TE {key}, default embedding will be used')
                 embeddings_dict_final[key] = embeddings_dict_default[key]
                 continue
+            
             embeddings_dict_final[key] = embeddings_dict_final.get(key, [])
             sep = embeddings_dict_sep[key]
             sep_len = len(sep)
             batch = []
-            for embedding_tag in embeddings_dict_tags[key]:
+            for embedding_tag in embeddings_dict_tags.get(key, []):
                 if len(batch)==0:
                     if len(embedding_tag) <= te_config[key]['max_tokens']:
                         batch.extend(embedding_tag)
